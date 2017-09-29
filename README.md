@@ -3,11 +3,6 @@
 > Esperanto: oro {noun} - gold {noun}
 
 
-[![Build Status](https://travis-ci.org/kelostrada/gold.svg?branch=master)](https://travis-ci.org/kelostrada/gold)
-[![Coverage Status](https://coveralls.io/repos/github/kelostrada/gold/badge.svg?branch=master)](https://coveralls.io/github/kelostrada/gold?branch=master)
-
-Opinionated interface to Monero-wallet-RPC API. This probject is largely based off the Bitcoin RPC implementation [solatis/gold](https://github.com/solatis/gold).
-
 Documentation: http://hexdocs.pm/oro/
 
 ## Usage
