@@ -3,50 +3,39 @@ defmodule Oro.Transaction do
   Struct which holds all transaction data
   """
 
-  defstruct [:account,
-             :address,
-             :category,
+  import IEx
+
+  defstruct [:txid,
+             :payment_id,
+             :height,
+             :timestamp,
              :amount,
-             :vout,
              :fee,
-             :confirmations,
-             :blockhash,
-             :blockindex,
-             :txid,
-             :time,
-             :timereceived,
-             :comment,
-             :otheraccount]
+             :note,
+             :destinations,
+             :type]
 
   @doc """
-  Creates Transaction struct from JSON transaction object.
+  Creates transaction struct from JSON transaction object.
   """
   def from_json(tx) do
+    # IEx.pry
+
     %Oro.Transaction{
-      account:       Map.get(tx, "account", nil),
-      address:       Map.get(tx, "address", nil),
-      category:      case Map.get(tx, "category", nil) do
-                       nil -> nil
-                       otherwise -> String.to_atom otherwise
-                     end,
-      amount:        Oro.xmr_to_decimal(Map.fetch!(tx, "amount")),
-      vout:          Map.get(tx, "vout", nil),
-      fee:           Oro.xmr_to_decimal(Map.get(tx, "fee", nil)),
-      confirmations: Map.fetch!(tx, "confirmations"),
-
-      blockhash:     Map.get(tx, "blockhash", nil),
-      blockindex:    Map.get(tx, "blockindex", nil),
-      txid:          Map.fetch!(tx, "txid"),
-
-      time:          Map.fetch!(tx, "time"),
-      timereceived:  Map.fetch!(tx, "timereceived"),
-      comment:       Map.get(tx, "comment", nil),
-      otheraccount:  Map.get(tx, "otheraccount", nil)
+      txid:         Map.get(tx, "txid"),
+      payment_id:   Map.get(tx, "payment_id"),
+      height:       Map.get(tx, "height"),
+      timestamp:    Map.get(tx, "timestamp"),
+      amount:       Oro.xmr_to_decimal(Map.fetch!(tx, "amount")),
+      fee:          Oro.xmr_to_decimal(Map.fetch!(tx, "fee")),
+      note:         Map.get(tx, "note"),
+      destinations: Map.get(tx, "destinations"),
+      type:         Map.get(tx, "type")
     }
   end
 
   @doc """
-  Returns `true` if argument is a bitcoin transaction; otherwise `false`.
+  Returns `true` if argument is a monero transaction; otherwise `false`.
   """
   def transaction?(%Oro.Transaction{}), do: true
   def transaction?(_), do: false

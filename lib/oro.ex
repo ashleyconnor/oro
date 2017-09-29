@@ -7,14 +7,16 @@ defmodule Oro do
 
   require Logger
 
+  alias Oro.Transfer
+  alias Oro.Payment
   alias Oro.Transaction
+  alias Oro.Receipt
 
   def start(_type, _args) do
     import Supervisor.Spec, warn: false
     opts = [strategy: :one_for_one, name: Oro.Supervisor]
     Supervisor.start_link([], opts)
   end
-
 
   @doc """
   Returns wallet's total available balance, raising an exception on failure.
@@ -27,10 +29,100 @@ defmodule Oro do
     call(name, {:getbalance, [account]}) |> handle_getbalance
   end
 
-  defp handle_getbalance({:ok, balance}), do:
-    {:ok, xmr_to_decimal(balance)}
+  defp handle_getbalance({:ok, %{"balance" => balance, "unlocked_balance" => unlocked_balance}}), do:
+    {:ok, %{"balance" => xmr_to_decimal(balance),
+      "unlocked_balance" => xmr_to_decimal(unlocked_balance)}}
   defp handle_getbalance(otherwise), do:
     otherwise
+
+  @doc """
+  Returns most recent transfers in wallet
+  """
+  def incoming_transfers(name, transfer_type \\ "all") do
+    case call(name, {:incoming_transfers, %{transfer_type: transfer_type}}) do
+      {:ok, %{"transfers" => transfers}} ->
+        {:ok, Enum.map(transfers, &Transfer.from_json/1)}
+      otherwise ->
+        otherwise
+    end
+  end
+
+  @doc """
+  Returns a list of transfers
+  """
+  def get_transfers(name, types \\ []) do
+    types = types |> Map.new(fn type -> {Atom.to_string(type), true} end)
+    case call(name, {:get_transfers, types}) do
+      {:ok, result} ->
+        {:ok, Enum.map(result, fn {key, transfers} -> {key, Enum.map(transfers, &Transaction.from_json/1)} end)}
+      otherwise ->
+        otherwise
+    end
+  end
+
+  @doc """
+  Returns most recent payments in wallet for given payment_id
+  """
+  def get_payments(name, payment_id) do
+    case call(name, {:get_payments, %{payment_id: payment_id}}) do
+      {:ok, %{"payments" => payments}} ->
+        {:ok, Enum.map(payments, &Payment.from_json/1)}
+      otherwise ->
+        otherwise
+    end
+  end
+
+  @doc """
+  Returns an integrated address with the given payment_id
+  defaults to random address
+  """
+  def make_integrated_address(name, payment_id \\ "") do
+    case call(name, {:make_integrated_address, %{payment_id: payment_id}}) do
+      {:ok, %{"integrated_address" => address}} ->
+        {:ok, address}
+      otherwise ->
+        otherwise
+    end
+  end
+
+  @doc """
+  Returns the current block height
+  """
+  def getheight(name) do
+    case call(name, {:getheight, []}) do
+      {:ok, %{"height" => height}} ->
+        {:ok, height}
+      otherwise ->
+        otherwise
+    end
+  end
+
+  @doc """
+  Returns the current block height
+  """
+  def transfer(name, destinations, opts \\ []) do
+    mixin = Keyword.get(opts, :mixin, 4)
+    priority = Keyword.get(opts, :priority, 1)
+    payment_id = Keyword.get(opts, :payment_id, nil)
+    unlock_time = Keyword.get(opts, :unlock_time, 0)
+    get_tx_key = Keyword.get(opts, :get_tx_key, true)
+    get_tx_hex = Keyword.get(opts, :get_tx_hex, true)
+
+    case call(name, {:transfer, %{
+      "destinations" => destinations,
+      "mixin" => mixin,
+      "priority" => priority,
+      "unlock_time" => unlock_time,
+      "payment_id" => payment_id,
+      "get_tx_key" => get_tx_key,
+      "get_tx_hex " => get_tx_hex
+    }}) do
+      {:ok, payment} ->
+        {:ok, Receipt.from_json(payment)}
+      otherwise ->
+        otherwise
+    end
+  end
 
   @doc """
   Call generic RPC command
@@ -73,6 +165,7 @@ defmodule Oro do
 
     case HTTPoison.post("http://" <> hostname <> ":" <> to_string(port) <> "/json_rpc", encoded, headers, options) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
+        Logger.debug "Response: #{ inspect body }"
         %{"result" => result} = Poison.decode!(body)
         {:ok, result}
       {:ok, %HTTPoison.Response{status_code: code, body: body}} ->
@@ -98,13 +191,6 @@ defmodule Oro do
   @doc """
   Converts a integer XMR amount to decimal
   """
-  def xmr_to_decimal(%{"balance" => balance, "unlocked_balance" => unlocked_balance}) do
-    %{
-      "balance": xmr_to_decimal(balance),
-      "unlocked_balance": xmr_to_decimal(unlocked_balance)
-    }
-  end
-
   def xmr_to_decimal(balance) when is_integer(balance) do
     %Decimal{sign: if(balance < 0, do: -1, else: 1), coef: abs(balance), exp: -12}
   end
