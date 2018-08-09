@@ -11,6 +11,7 @@ defmodule Oro do
   alias Oro.Payment
   alias Oro.Transaction
   alias Oro.Receipt
+  alias Oro.PoisonedDecimal
 
   def start(_type, _args) do
     import Supervisor.Spec, warn: false
@@ -22,18 +23,19 @@ defmodule Oro do
   Returns wallet's total available balance, raising an exception on failure.
   """
   def getbalance(name, account \\ nil)
+
   def getbalance(name, nil) do
     call(name, :getbalance) |> handle_getbalance
   end
+
   def getbalance(name, account) do
     call(name, {:getbalance, [account]}) |> handle_getbalance
   end
 
-  defp handle_getbalance({:ok, %{"balance" => balance, "unlocked_balance" => unlocked_balance}}), do:
-    {:ok, %{"balance" => xmr_to_decimal(balance),
-      "unlocked_balance" => xmr_to_decimal(unlocked_balance)}}
-  defp handle_getbalance(otherwise), do:
-    otherwise
+  defp handle_getbalance({:ok, %{"balance" => balance, "unlocked_balance" => unlocked_balance}}),
+    do: {:ok, %{"balance" => xmr_to_decimal(balance), "unlocked_balance" => xmr_to_decimal(unlocked_balance)}}
+
+  defp handle_getbalance(otherwise), do: otherwise
 
   @doc """
   Returns most recent transfers in wallet
@@ -42,6 +44,7 @@ defmodule Oro do
     case call(name, {:incoming_transfers, %{transfer_type: transfer_type}}) do
       {:ok, %{"transfers" => transfers}} ->
         {:ok, Enum.map(transfers, &Transfer.from_json/1)}
+
       otherwise ->
         otherwise
     end
@@ -50,11 +53,20 @@ defmodule Oro do
   @doc """
   Returns a list of transfers
   """
-  def get_transfers(name, types \\ []) do
-    types = types |> Map.new(fn type -> {Atom.to_string(type), true} end)
-    case call(name, {:get_transfers, types}) do
+  @max_unsigned_integer 9_007_199_254_740_991
+
+  def get_transfers(name, types \\ [], min_height \\ 0, max_height \\ @max_unsigned_integer) do
+    args =
+      types
+      |> Map.new(fn type -> {Atom.to_string(type), true} end)
+      |> Map.put(:min_height, min_height)
+      |> Map.put(:max_height, max_height)
+      |> Map.put(:filter_by_height, true)
+
+    case call(name, {:get_transfers, args}) do
       {:ok, result} ->
         {:ok, Enum.map(result, fn {key, transfers} -> {key, Enum.map(transfers, &Transaction.from_json/1)} end)}
+
       otherwise ->
         otherwise
     end
@@ -67,6 +79,7 @@ defmodule Oro do
     case call(name, {:get_payments, %{payment_id: payment_id}}) do
       {:ok, %{"payments" => payments}} ->
         {:ok, Enum.map(payments, &Payment.from_json/1)}
+
       otherwise ->
         otherwise
     end
@@ -80,8 +93,35 @@ defmodule Oro do
     case call(name, {:make_integrated_address, %{payment_id: payment_id}}) do
       {:ok, %{"integrated_address" => address}} ->
         {:ok, address}
+
       otherwise ->
         otherwise
+    end
+  end
+
+  @doc """
+  Returns a new subaddress with index
+  """
+  def create_address(name) do
+    case call(name, {:create_address, %{}}) do
+      {:ok, %{"address" => address, "address_index" => index}} ->
+        {:ok, address, index}
+
+      otherwise ->
+        otherwise
+    end
+  end
+
+  @doc """
+  Splits an integrated address returning the address and payment ID
+  """
+  def split_integrated_address(name, integrated_address) do
+    case call(name, {:split_integrated_address, %{integrated_address: integrated_address}}) do
+      {:ok, %{"payment_id" => payment_id, "standard_address" => standard_address}} ->
+        {:ok, payment_id, standard_address}
+
+      _ ->
+        {:ok, nil, integrated_address}
     end
   end
 
@@ -92,33 +132,40 @@ defmodule Oro do
     case call(name, {:getheight, []}) do
       {:ok, %{"height" => height}} ->
         {:ok, height}
+
       otherwise ->
         otherwise
     end
   end
 
   @doc """
-  Returns the current block height
+  Transfer the given amount to the given address
+  [{"amount": 10000, "address": "A2hPuh91MN..."}]
   """
-  def transfer(name, destinations, opts \\ []) do
-    mixin = Keyword.get(opts, :mixin, 4)
+  def transfer(name, destinations, opts \\ []) when is_list(destinations) do
+    mixin = Keyword.get(opts, :mixin, 7)
     priority = Keyword.get(opts, :priority, 1)
     payment_id = Keyword.get(opts, :payment_id, nil)
     unlock_time = Keyword.get(opts, :unlock_time, 0)
     get_tx_key = Keyword.get(opts, :get_tx_key, true)
     get_tx_hex = Keyword.get(opts, :get_tx_hex, true)
 
-    case call(name, {:transfer, %{
-      "destinations" => destinations,
-      "mixin" => mixin,
-      "priority" => priority,
-      "unlock_time" => unlock_time,
-      "payment_id" => payment_id,
-      "get_tx_key" => get_tx_key,
-      "get_tx_hex " => get_tx_hex
-    }}) do
+    case call(
+           name,
+           {:transfer,
+            %{
+              "destinations" => destinations,
+              "mixin" => mixin,
+              "priority" => priority,
+              "unlock_time" => unlock_time,
+              "payment_id" => payment_id,
+              "get_tx_key" => get_tx_key,
+              "get_tx_hex " => get_tx_hex
+            }}
+         ) do
       {:ok, payment} ->
         {:ok, Receipt.from_json(payment)}
+
       otherwise ->
         otherwise
     end
@@ -127,12 +174,13 @@ defmodule Oro do
   @doc """
   Call generic RPC command
   """
-  def call(name, method) when is_atom(method), do:
-    call(name, {method, []})
+  def call(name, method) when is_atom(method), do: call(name, {method, []})
+
   def call(name, {method, params}) when is_atom(method) do
     case load_config(name) do
       :undefined ->
         {:error, {:invalid_configuration, name}}
+
       config ->
         handle_rpc_request(method, params, config)
     end
@@ -142,34 +190,38 @@ defmodule Oro do
   # Internal functions
   ##
   defp handle_rpc_request(method, params, config) when is_atom(method) do
-    %{hostname: hostname, port: port} = config
-
-    Logger.debug "Monero-wallet-RPC request for method: #{method}, params: #{inspect params}"
-    Logger.debug "Hostname: #{hostname} Port: #{port}"
+    %{hostname: hostname, port: port, user: user, password: password} = config
 
     params = PoisonedDecimal.poison_params(params)
+    command = %{jsonrpc: "2.0", method: to_string(method), params: params, id: 0}
 
-    command = %{"jsonrpc": "2.0",
-                "method": to_string(method),
-                "params": params,
-                "id": 0}
-
-    # headers = ["Authorization": "Basic " <> Base.encode64(user <> ":" <> password)]
-    headers = ["Content-Type": "application/json"]
+    headers = [
+      "Authorization": "Basic " <> Base.encode64(user <> ":" <> password),
+      "Content-Type": "application/json"
+    ]
 
     options = [timeout: 30000, recv_timeout: 20000]
 
     encoded = Poison.encode!(command)
 
-    Logger.debug("Encoded: #{encoded}")
-
+    # Monero returns 200 for errors...wtf?
     case HTTPoison.post("http://" <> hostname <> ":" <> to_string(port) <> "/json_rpc", encoded, headers, options) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
-        Logger.debug "Response: #{ inspect body }"
-        %{"result" => result} = Poison.decode!(body)
-        {:ok, result}
+        Logger.debug("Response: #{inspect(body)}")
+
+        case Poison.decode!(body) do
+          %{"result" => result} ->
+            {:ok, result}
+
+          %{"error" => %{"message" => message}} ->
+            handle_error(500, message)
+        end
+
       {:ok, %HTTPoison.Response{status_code: code, body: body}} ->
         handle_error(code, body)
+
+      {:error, %HTTPoison.Error{id: nil, reason: reason}} ->
+        {:error, reason}
     end
   end
 
@@ -177,12 +229,15 @@ defmodule Oro do
 
   defp handle_error(status_code, error) do
     status = @statuses[status_code]
-    Logger.debug "Monero-wallet-RPC error status #{status}: #{error}"
+    Logger.debug("Monero-wallet-RPC error status #{status}: #{error}")
+
     case Poison.decode(error) do
       {:ok, %{"error" => %{"message" => message}}} ->
         {:error, %{status: status, error: message}}
+
       {:error, :invalid, _pos} ->
         {:error, %{status: status, error: error}}
+
       {:error, {:invalid, _token, _pos}} ->
         {:error, %{status: status, error: error}}
     end
@@ -201,5 +256,4 @@ defmodule Oro do
       :undefined -> :undefined
     end
   end
-
 end

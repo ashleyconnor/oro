@@ -22,7 +22,7 @@ correct node
 config :oro, :my_node, [
   hostname: "localhost",
   port: 8332,
-  user: "bitcoinrpc",
+  user: "monero-rpc",
   password: "changeme"
 ]
 ```
@@ -52,3 +52,8 @@ When you are done setting everything up you can run tests with `docker compose u
 ## Features
   * Uses the [Decimal](https://github.com/ericmj/decimal) library for representing XMR amounts, to avoid loss of precision
   * Directly maps [Monero-wallet-RPC functions](https://getmonero.org/resources/developer-guides/wallet-rpc.html)
+
+## TODO
+
+- Map missing RPC methods
+- Tests
