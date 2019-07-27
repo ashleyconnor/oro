@@ -16,7 +16,9 @@ defmodule Oro.Transaction do
     :double_spend_seen,
     :destinations,
     :subaddr_index,
-    :unlock_time
+    :unlock_time,
+    :suggested_confirmations_threshold,
+    :confirmations
   ]
 
   @doc """
@@ -36,7 +38,9 @@ defmodule Oro.Transaction do
       destinations: Map.get(tx, "destinations"),
       type: Map.get(tx, "type"),
       unlock_time: Map.get(tx, "unlock_time"),
-      subaddr_index: Map.get(tx, "subaddr_index")
+      subaddr_index: Map.get(tx, "subaddr_index"),
+      confirmations: Map.get(tx, "confirmations"),
+      suggested_confirmations_threshold: Map.get(tx, "suggested_confirmations_threshold")
     }
   end
 

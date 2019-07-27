@@ -3,8 +3,6 @@ defmodule Oro.Payment do
   Struct which holds all payment data
   """
 
-  import IEx
-
   defstruct [:payment_id, :tx_hash, :amount, :block_height, :unlock_time]
 
   @doc """

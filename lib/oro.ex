@@ -72,6 +72,17 @@ defmodule Oro do
     end
   end
 
+  def get_transfer_by_txid(name, txid) do
+    case call(name, {:get_transfer_by_txid, %{txid: txid}}) do
+      {:ok, result} ->
+        transaction = Map.get(result, "transfer") |> Transaction.from_json
+        {:ok, transaction}
+
+      otherwise ->
+        otherwise
+    end
+  end
+
   @doc """
   Returns most recent payments in wallet for given payment_id
   """
@@ -90,13 +101,7 @@ defmodule Oro do
   defaults to random address
   """
   def make_integrated_address(name, payment_id \\ "") do
-    case call(name, {:make_integrated_address, %{payment_id: payment_id}}) do
-      {:ok, %{"integrated_address" => address}} ->
-        {:ok, address}
-
-      otherwise ->
-        otherwise
-    end
+    call(name, {:make_integrated_address, %{payment_id: payment_id}})
   end
 
   @doc """
@@ -144,11 +149,13 @@ defmodule Oro do
   """
   def transfer(name, destinations, opts \\ []) when is_list(destinations) do
     mixin = Keyword.get(opts, :mixin, 7)
+    ring_size = Keyword.get(opts, :ring_size, 7)
     priority = Keyword.get(opts, :priority, 1)
-    payment_id = Keyword.get(opts, :payment_id, nil)
     unlock_time = Keyword.get(opts, :unlock_time, 0)
+    do_not_relay = Keyword.get(opts, :do_not_relay, false)
     get_tx_key = Keyword.get(opts, :get_tx_key, true)
     get_tx_hex = Keyword.get(opts, :get_tx_hex, true)
+    get_tx_metadata = Keyword.get(opts, :get_tx_metadata, true)
 
     case call(
            name,
@@ -156,11 +163,13 @@ defmodule Oro do
             %{
               "destinations" => destinations,
               "mixin" => mixin,
+              "ring_size" => ring_size,
               "priority" => priority,
               "unlock_time" => unlock_time,
-              "payment_id" => payment_id,
+              "do_not_relay" => do_not_relay,
               "get_tx_key" => get_tx_key,
-              "get_tx_hex " => get_tx_hex
+              "get_tx_hex " => get_tx_hex,
+              "get_tx_metadata" => get_tx_metadata
             }}
          ) do
       {:ok, payment} ->
